@@ -28,7 +28,9 @@ data/phrases.js         常用句快捷鍵
 data/vocab.js           詞彙卡（切法、火候、器具）
 data/equipment.js       家裡器具說明（範例，待媽媽確認）
 data/tw-list.js         已上傳的台語錄音清單（錄音頁自動產生）
-images/hero.jpg         主視覺
+images/hero.jpg         主視覺（1200px 寬）
+images/hero-800.jpg     主視覺（800px 寬，手機用）
+images/logo.jpg         頂端列 logo
 images/icon-192.png     App 圖示
 images/icon-512.png
 images/steps/           步驟照片（檔名：菜id-步驟號.jpg）

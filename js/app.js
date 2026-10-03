@@ -158,7 +158,7 @@
       return '<a class="tile" href="' + t[0] + '"><span class="te">' + t[1] + '</span><span class="tt">' + U(t[2]) + "</span></a>";
     }).join("");
     return '<section class="hero">' +
-      '<img class="hero-img" src="images/hero.jpg" alt="燕飛食光：奶奶笑著端出一盤蛋糕">' +
+      '<img class="hero-img" src="images/hero-800.jpg" srcset="images/hero-800.jpg 800w, images/hero.jpg 1200w" sizes="100vw" width="1200" height="676" fetchpriority="high" decoding="async" alt="燕飛食光：奶奶笑著端出一盤蛋糕">' +
       '<div class="hero-text"><h1 class="sr-only">燕飛食光</h1><p class="hero-sub">' + triUI(ui("appSub")) + "</p></div></section>" +
       '<div class="wrap">' +
       '<div class="strip"><div class="strip-season">' + s.e + " " + UT("season") + " <b>" + P1(s) + "</b></div>" + strip + "</div>" +

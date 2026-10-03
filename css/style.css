@@ -54,7 +54,7 @@ img { max-width: 100%; }
 
 /* ---------- 主視覺 ---------- */
 .hero { position: relative; background: #fff; }
-.hero-img { display: block; width: 100%; height: auto; min-height: 150px; object-fit: cover; }
+.hero-img { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 676; object-fit: cover; background: var(--blue-xl); }
 .hero-text { padding: 10px 16px 4px; text-align: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .hero-sub { margin: 4px 0 0; }
