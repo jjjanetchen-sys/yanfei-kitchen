@@ -20,6 +20,17 @@
   };
   const pad = function (n) { return n < 10 ? "0" + n : "" + n; };
   function todayStr() { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function addDays(s, n) {
+    const p = s.split("-");
+    const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + n);
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+  const WEEKDAYS = {
+    zh: ["週日", "週一", "週二", "週三", "週四", "週五", "週六"],
+    en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    tl: ["Lin", "Lun", "Mar", "Miy", "Huw", "Biy", "Sab"]
+  };
+  function weekday(s, lang) { const p = s.split("-"); return WEEKDAYS[lang][new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay()]; }
   function shortDate(s) { const p = String(s).split("-"); return p.length === 3 ? Number(p[1]) + "/" + Number(p[2]) : s; }
   function seasonNow() {
     const m = new Date().getMonth() + 1;
@@ -34,15 +45,38 @@
   function compactDate(d) { return String(d).replace(/-/g, ""); }
 
   /* ---------- 狀態 ---------- */
-  const DEFAULTS = { lang: "zh", multi: true, menu: { date: "", ids: [] }, fridge: [], fb: {}, shop: [] };
+  const DEFAULTS = { lang: "zh", multi: true, week: {}, shopDays: 7, fridge: [], fb: {}, shop: [] };
   let ST = load();
   function load() {
     try {
       const o = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-      return Object.assign({}, DEFAULTS, o);
-    } catch (e) { return Object.assign({}, DEFAULTS); }
+      const st = Object.assign({}, DEFAULTS, o);
+      st.week = Object.assign({}, st.week);
+      /* 舊版只有一份「今日菜單」，搬進一週菜單 */
+      if (o.menu && o.menu.ids && o.menu.ids.length && o.menu.date && !st.week[o.menu.date]) st.week[o.menu.date] = o.menu.ids;
+      delete st.menu;
+      /* 清掉兩週以前的菜單 */
+      const limit = addDays(todayStr(), -14);
+      Object.keys(st.week).forEach(function (d) { if (d < limit) delete st.week[d]; });
+      return st;
+    } catch (e) { return Object.assign({}, DEFAULTS, { week: {} }); }
   }
   function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(ST)); } catch (e) { /* 無痕模式等情況，忽略 */ } }
+
+  /* ---------- 一週菜單 ---------- */
+  function dayIds(d) { return (ST.week[d] || []).filter(function (id) { return REC[id]; }); }
+  function setDay(d, ids) { if (ids.length) ST.week[d] = ids; else delete ST.week[d]; }
+  function todayIds() { return dayIds(todayStr()); }
+  /* 在食譜頁選菜時，目前是替哪一天選（null = 今天） */
+  let PICK_DAY = null;
+  function targetDay() { return PICK_DAY || todayStr(); }
+  function dayLabel(d) { return (d === todayStr() ? UT("fbToday") + " " : "") + shortDate(d) + "（" + weekday(d, ST.lang) + "）"; }
+  function menuBtn(id, cls) {
+    const d = targetDay();
+    const inM = dayIds(d).indexOf(id) >= 0;
+    const tag = d === todayStr() ? "" : " · " + shortDate(d);
+    return '<button class="btn ' + (cls || "") + (inM ? " on" : "") + '" data-act="menu" data-id="' + id + '">' + (inM ? "✓ " + U1("inMenu") : "＋ " + U1("addMenu")) + tag + "</button>";
+  }
 
   /* ---------- 多語顯示 ---------- */
   function order() { return [ST.lang].concat(LANGS.filter(function (l) { return l !== ST.lang; })); }
@@ -78,7 +112,8 @@
   function amtText(n, u, lang) {
     const un = D.UNITS[u];
     if (!un) return "";
-    if (n == null || u === "half") return un[lang];
+    if (n == null) return un[lang];
+    if (u === "half") return n > 1 ? n + " × " + un[lang] : un[lang];
     let num;
     if (n === 0.5) num = lang === "zh" ? "半" : "1/2";
     else if (n === 0.33) num = lang === "zh" ? "三分之一" : "1/3";
@@ -144,7 +179,7 @@
   /* ---------- 首頁 ---------- */
   function vHome() {
     const s = D.SEASONS[seasonNow()];
-    const ids = ST.menu.ids.filter(function (id) { return REC[id]; });
+    const ids = todayIds();
     let strip;
     if (ids.length) {
       strip = '<div class="strip-menu"><b>📅 ' + UT("today") + "</b>" + ids.map(function (id) {
@@ -154,7 +189,7 @@
       strip = '<div class="strip-menu"><b>📅 ' + UT("today") + '</b><span class="dim">' + UT("menuEmpty") + '</span> <a class="mchip add" href="#/recipes">＋ ' + U1("menuAdd") + "</a></div>";
     }
     const tiles = [
-      ["#/menu", "📅", "today"], ["#/recipes", "📖", "recipes"], ["#/phrases", "💬", "phrases"],
+      ["#/menu", "📅", "today"], ["#/week", "🗓️", "week"], ["#/recipes", "📖", "recipes"], ["#/phrases", "💬", "phrases"],
       ["#/vocab", "🔤", "vocab"], ["#/shop", "🛒", "shop"], ["#/fridge", "🧊", "fridge"],
       ["#/equip", "🍳", "equip"], ["#/feedback", "😋", "feedback"], ["#/pick", "🤔", "pick"]
     ].filter(function (t) { return t[2] !== "equip" || D.EQUIP_READY; }).map(function (t) {
@@ -185,7 +220,6 @@
     return true;
   }
   function recipeCard(r) {
-    const inM = ST.menu.ids.indexOf(r.id) >= 0;
     const b = [];
     b.push(r.cooker === "rice" ? "🍚 " + UT("outerPot") + " " + r.outer : "🔥 " + UT("stove"));
     b.push("🥣".repeat(r.elder.soft));
@@ -194,7 +228,7 @@
     if (love.all > 0 && fbLove(r.id) > 0) b.push("😋 ×" + love.all);
     return '<article class="rcard"><a class="rlink" href="#/recipe/' + r.id + '"><span class="re">' + r.e + '</span><span class="rn">' + triUI(r) + "</span></a>" +
       '<div class="badges">' + b.map(function (x) { return '<span class="badge">' + x + "</span>"; }).join("") + "</div>" +
-      '<button class="btn small ' + (inM ? "on" : "") + '" data-act="menu" data-id="' + r.id + '">' + (inM ? "✓ " + U1("inMenu") : "＋ " + U1("addMenu")) + "</button></article>";
+      menuBtn(r.id, "small") + "</article>";
   }
   function recipeListHtml() {
     const list = D.RECIPES.filter(recipeMatches);
@@ -207,7 +241,9 @@
       chip("rf", "cooker", "stove", "🔥 " + UT("stove"), RF.cooker === "stove") +
       chip("rf", "soft", "1", "🥣🥣🥣 " + UT("softOnly"), RF.soft) +
       chip("rf", "tbc", "1", "⏳ " + UT("showTbc") + " (" + D.RECIPES.filter(function (r) { return r.status === "tbc"; }).length + ")", RF.tbc);
-    return '<div class="wrap">' + backBar("📖 " + UT("recipes")) +
+    const picking = PICK_DAY ? '<div class="pickbar"><div><span class="dim">' + UT("pickingFor") + "</span><b>" + dayLabel(PICK_DAY) + "</b> · " + dayIds(PICK_DAY).length + " " + UT("dishesCount") +
+      '</div><a class="btn small on" href="#/week">✓ ' + U1("done") + "</a></div>" : "";
+    return '<div class="wrap">' + backBar("📖 " + UT("recipes")) + picking +
       '<input id="q" class="search" type="search" placeholder="' + esc(UT("searchPh")) + '" value="' + esc(RF.q) + '" autocomplete="off">' +
       '<div class="chips">' + seasons + "</div><div class=\"chips\">" + tags + other + "</div>" +
       '<div id="rlist" class="rlist">' + recipeListHtml() + "</div></div>";
@@ -235,7 +271,6 @@
   function vRecipe(id) {
     const r = REC[id];
     if (!r) return '<div class="wrap">' + backBar(UT("recipes")) + '<p class="empty">' + U("noResult") + "</p></div>";
-    const inM = ST.menu.ids.indexOf(id) >= 0;
     const tags = r.tags.map(function (t) { return '<span class="badge">' + P1(D.TAGS[t]) + "</span>"; }).join("") +
       r.seasons.map(function (z) { const k = D.SEASON_BY_ZH[z]; return '<span class="badge season">' + D.SEASONS[k].e + "</span>"; }).join("") +
       (r.status === "tbc" ? '<span class="badge tbc">⏳ ' + UT("tbc") + "</span>" : '<span class="badge ok">✓ ' + UT("confirmed") + "</span>");
@@ -259,7 +294,7 @@
       '<header class="rhead"><span class="rbig">' + r.e + '</span><h1 class="rtitle">' + tri(r) + "</h1>" +
       '<div class="audio-title">' + audioBtns(r, "r_" + id) + "</div>" +
       '<div class="badges">' + tags + "</div>" +
-      '<button class="btn ' + (inM ? "on" : "") + '" data-act="menu" data-id="' + id + '">' + (inM ? "✓ " + U1("inMenu") : "＋ " + U1("addMenu")) + "</button></header>" +
+      menuBtn(id) + "</header>" +
       (r.status === "tbc" ? '<p class="note-banner">⏳ ' + tri(ui("tbcBanner")) + "</p>" : "") +
       cookerPanel(r) + elderPanel(r) +
       '<section class="card secret"><h2>⭐ ' + U("secret") + "</h2><p>" + tri(r.secret) + "</p></section>" +
@@ -270,14 +305,13 @@
   }
 
   /* ---------- 今日菜單 ---------- */
-  function menuLink() { return baseUrl() + "#/menu?m=" + ST.menu.ids.join("-") + "&d=" + (ST.menu.date || todayStr()) + "&l=tl"; }
+  function menuLink() { return baseUrl() + "#/menu?m=" + todayIds().join("-") + "&d=" + todayStr() + "&l=tl"; }
   function vMenu() {
-    const ids = ST.menu.ids.filter(function (id) { return REC[id]; });
-    const d = ST.menu.date || todayStr();
-    const stale = ids.length && d !== todayStr();
+    const ids = todayIds();
+    const d = todayStr();
     let body;
     if (!ids.length) {
-      body = '<div class="empty big">🍽️<p>' + U("menuEmpty") + '</p><a class="btn big" href="#/recipes">＋ ' + U1("menuAdd") + "</a></div>";
+      body = '<div class="empty big">🍽️<p>' + U("menuEmpty") + '</p><a class="btn big" href="#/recipes">＋ ' + U1("menuAdd") + '</a><a class="btn big" href="#/week" style="margin-top:10px">🗓️ ' + U1("planWeek") + "</a></div>";
     } else {
       body = ids.map(function (id, i) {
         const r = REC[id];
@@ -288,32 +322,61 @@
         ids.map(function (id, i) { return (i + 1) + ". " + REC[id].zh + " — " + REC[id].tl; }).join("\n") + "\n" + menuLink();
       body += '<div class="actions"><a class="btn line big" href="' + lineShare(text) + '" target="_blank" rel="noopener">💬 ' + U1("menuShare") + "</a>" +
         '<button class="btn" data-act="copy" data-t="' + esc(menuLink()) + '">🔗 ' + U1("copyLink") + '</button><a class="btn" href="#/shop">🛒 ' + U1("shop") +
-        '</a><button class="btn ghost" data-act="clearmenu">🗑 ' + U1("clear") + "</button></div>";
+        '</a><a class="btn" href="#/week">🗓️ ' + U1("week") + '</a><button class="btn ghost" data-act="clearmenu">🗑 ' + U1("clear") + "</button></div>";
     }
     return '<div class="wrap">' + backBar("📅 " + UT("today")) +
-      '<p class="dim">' + UT("menuDate") + ": <b>" + shortDate(d) + "</b>" + (stale ? ' <span class="badge tbc">⚠ ' + shortDate(d) + "</span>" : "") + "</p>" + body + "</div>";
+      '<p class="dim">' + UT("menuDate") + ": <b>" + dayLabel(d) + "</b></p>" + body + "</div>";
+  }
+
+  /* ---------- 一週菜單 ---------- */
+  function vWeek() {
+    let total = 0;
+    const days = [];
+    for (let i = 0; i < 7; i++) days.push(addDays(todayStr(), i));
+    const cards = days.map(function (d) {
+      const ids = dayIds(d);
+      total += ids.length;
+      const list = ids.length ? '<ul class="wlist">' + ids.map(function (id) {
+        return '<li><a class="wname" href="#/recipe/' + id + '"><span class="we">' + REC[id].e + "</span><span>" + triUI(REC[id]) + '</span></a><button class="wrm" data-act="weekrm" data-d="' + d + '" data-id="' + id + '" aria-label="' + esc(UT("remove")) + '">✕</button></li>';
+      }).join("") + "</ul>" : '<p class="dim wnone">' + UT("noDish") + "</p>";
+      return '<section class="card wday' + (d === todayStr() ? " today" : "") + '"><h2>' + dayLabel(d) + "</h2>" + list +
+        '<div class="mbtns"><button class="btn small" data-act="weekadd" data-d="' + d + '">＋ ' + U1("addDish") + "</button>" +
+        (d === todayStr() && ids.length ? '<a class="btn small line" href="#/menu">💬 ' + U1("menuShare") + "</a>" : "") + "</div></section>";
+    }).join("");
+    return '<div class="wrap">' + backBar("🗓️ " + UT("week")) + '<p class="dim">' + UT("weekHint") + "</p>" + cards +
+      '<div class="actions"><a class="btn big' + (total ? " on" : "") + '" href="#/shop">🛒 ' + U1("shop") + " · " + total + " " + UT("dishesCount") + "</a></div></div>";
   }
 
   /* ---------- 採買清單 ---------- */
+  function shopDates() {
+    const out = [];
+    for (let i = 0; i < ST.shopDays; i++) out.push(addDays(todayStr(), i));
+    return out;
+  }
   function shoppingList() {
     const map = {};
-    ST.menu.ids.forEach(function (id) {
-      const r = REC[id];
-      if (!r) return;
-      r.ing.forEach(function (x) {
-        const g = D.ING[x.id];
-        if (g.area === "none") return;
-        const m = map[x.id] || (map[x.id] = { id: x.id, nums: {}, texts: {}, from: [] });
-        if (x.n == null || x.u === "half") m.texts[x.u] = x.n;
-        else m.nums[x.u] = (m.nums[x.u] || 0) + x.n;
-        if (m.from.indexOf(id) < 0) m.from.push(id);
+    shopDates().forEach(function (d) {
+      dayIds(d).forEach(function (id) {
+        REC[id].ing.forEach(function (x) {
+          const g = D.ING[x.id];
+          if (g.area === "none") return;
+          const m = map[x.id] || (map[x.id] = { id: x.id, nums: {}, texts: {} });
+          if (x.n == null) m.texts[x.u] = null;
+          else m.nums[x.u] = (m.nums[x.u] || 0) + x.n;
+        });
       });
     });
     return Object.keys(map).map(function (k) { return map[k]; });
   }
   function vShop() {
     const list = shoppingList();
-    if (!list.length) return '<div class="wrap">' + backBar("🛒 " + UT("shop")) + '<div class="empty big">🛒<p>' + U("shopEmpty") + '</p><a class="btn big" href="#/recipes">＋ ' + U1("menuAdd") + "</a></div></div>";
+    const dates = shopDates();
+    let nDish = 0;
+    dates.forEach(function (d) { nDish += dayIds(d).length; });
+    const range = '<p class="dim">' + UT("shopRange") + '</p><div class="chips">' + [1, 3, 7].map(function (n) {
+      return chip("shopdays", "n", n, UT("days" + n), ST.shopDays === n);
+    }).join("") + '</div><p class="dim">' + shortDate(dates[0]) + (dates.length > 1 ? " – " + shortDate(dates[dates.length - 1]) : "") + " · " + nDish + " " + UT("dishesCount") + "</p>";
+    if (!list.length) return '<div class="wrap">' + backBar("🛒 " + UT("shop")) + range + '<div class="empty big">🛒<p>' + U("shopEmpty") + '</p><a class="btn big" href="#/week">🗓️ ' + U1("planWeek") + "</a></div></div>";
     const groups = {};
     const have = [];
     list.forEach(function (m) {
@@ -344,7 +407,7 @@
         return '<li class="srow"><span class="ie">' + g.e + '</span><span class="iname">' + tri(g) + "</span></li>";
       }).join("") + "</ul></section>";
     }
-    return '<div class="wrap">' + backBar("🛒 " + UT("shop")) + html + '<div class="actions"><button class="btn ghost" data-act="clearshop">↺ ' + U1("clear") + "</button></div></div>";
+    return '<div class="wrap">' + backBar("🛒 " + UT("shop")) + range + html + '<div class="actions"><button class="btn ghost" data-act="clearshop">↺ ' + U1("clear") + "</button></div></div>";
   }
 
   /* ---------- 冰箱 ---------- */
@@ -446,7 +509,7 @@
   }
   function vFeedback() {
     const t = todayStr();
-    const ids = ST.menu.ids.filter(function (id) { return REC[id]; });
+    const ids = todayIds();
     let today = ids.length ? ids.map(function (id) {
       return '<div class="fbitem"><div class="fbname"><span class="re">' + REC[id].e + "</span>" + triUI(REC[id]) + "</div>" + fbButtons(id) + "</div>";
     }).join("") : '<p class="empty">' + U("menuEmpty") + ' <a href="#/recipes">＋</a></p>';
@@ -489,10 +552,9 @@
     }).sort(function (a, b) { return b.score - a.score; }).slice(0, 3);
     const s = D.SEASONS[sn];
     return '<div class="wrap">' + backBar("🤔 " + UT("pick")) + '<p class="dim">' + s.e + " " + P1(s) + "</p>" + scored.map(function (x) {
-      const inM = ST.menu.ids.indexOf(x.r.id) >= 0;
       return '<article class="card pickc"><a class="mname" href="#/recipe/' + x.r.id + '"><span class="re">' + x.r.e + "</span><span>" + triUI(x.r) + "</span></a>" +
         '<div class="badges">' + x.why.map(function (w) { return '<span class="badge ok">' + UT(w) + "</span>"; }).join("") + "</div>" +
-        '<button class="btn small ' + (inM ? "on" : "") + '" data-act="menu" data-id="' + x.r.id + '">' + (inM ? "✓ " + U1("inMenu") : "＋ " + U1("addMenu")) + "</button></article>";
+        menuBtn(x.r.id, "small") + "</article>";
     }).join("") + "</div>";
   }
 
@@ -514,7 +576,7 @@
       /* 分隔符號是連字號；舊連結的逗號也接受 */
       const ids = q.get("m").split(/[-,]/).filter(function (id, i, arr) { return REC[id] && arr.indexOf(id) === i; });
       const date = /^\d{4}-\d{2}-\d{2}$/.test(q.get("d") || "") ? q.get("d") : todayStr();
-      const same = date === ST.menu.date && ids.join() === ST.menu.ids.join();
+      const same = ids.join() === dayIds(date).join();
       if (ids.length && !same) pendingMenu = { date: date, ids: ids };
     }
     if (q.has("fb")) {
@@ -537,12 +599,14 @@
   function showMenuAsk() {
     if (!pendingMenu) return;
     const pm = pendingMenu;
-    const old = pm.date !== todayStr();
-    const cur = ST.menu.ids.filter(function (id) { return REC[id]; });
+    const old = pm.date < todayStr();
+    const future = pm.date > todayStr();
+    const cur = dayIds(old ? todayStr() : pm.date);
     const ov = $("#overlay");
     ov.innerHTML = '<div class="obox ask"><div class="oe">📅</div><h2 class="askq">' + U("menuAsk") + "</h2>" +
-      '<p class="askdate">' + UT("menuDate") + ": <b>" + shortDate(pm.date) + "</b></p>" +
+      '<p class="askdate">' + UT("menuDate") + ": <b>" + dayLabel(pm.date) + "</b></p>" +
       (old ? '<p class="askwarn">⚠️ ' + U("menuOld") + "</p>" : "") +
+      (future ? '<p class="note-banner">🗓️ ' + U("menuFuture") + "</p>" : "") +
       '<ol class="asklist">' + pm.ids.map(function (id) { return "<li>" + REC[id].e + " " + tri(REC[id]) + "</li>"; }).join("") + "</ol>" +
       (cur.length ? '<p class="dim">' + UT("menuReplace") + "：" + cur.map(function (id) { return P1(REC[id]); }).join("、") + "</p>" : "") +
       '<div class="askbtns"><button class="btn big on" data-act="acceptmenu">✓ ' + U1("menuYes") + '</button><button class="btn big ghost" data-act="closebig">✕ ' + U1("menuNo") + "</button></div></div>";
@@ -558,12 +622,14 @@
     const parts = path.split("/").filter(Boolean);
     const name = parts[0] || "home";
     releaseWake();
+    if (name !== "recipes" && name !== "recipe") PICK_DAY = null;
     $("#overlay").classList.remove("show");
     let html;
     switch (name) {
       case "recipes": html = vRecipes(); break;
       case "recipe": html = vRecipe(parts[1]); keepAwake(); break;
       case "menu": html = vMenu(); break;
+      case "week": html = vWeek(); break;
       case "phrases": html = vPhrases(); break;
       case "vocab": html = vVocab(); break;
       case "shop": html = vShop(); break;
@@ -586,7 +652,7 @@
     const raw = (hash || "#/").replace(/^#/, "").split("?")[0];
     const parts = raw.split("/").filter(Boolean);
     const name = parts[0] || "home";
-    const map = { recipes: vRecipes, menu: vMenu, phrases: vPhrases, vocab: vVocab, shop: vShop, fridge: vFridge, equip: vEquip, feedback: vFeedback, pick: vPick };
+    const map = { recipes: vRecipes, menu: vMenu, week: vWeek, phrases: vPhrases, vocab: vVocab, shop: vShop, fridge: vFridge, equip: vEquip, feedback: vFeedback, pick: vPick };
     let html;
     if (name === "recipe") html = vRecipe(parts[1]);
     else html = (map[name] || vHome)();
@@ -696,11 +762,20 @@
     },
     menu: function (el) {
       const id = el.dataset.id;
-      if (ST.menu.date !== todayStr()) ST.menu = { date: todayStr(), ids: [] };
-      toggleIn(ST.menu.ids, id);
+      const d = targetDay();
+      const ids = dayIds(d);
+      toggleIn(ids, id);
+      setDay(d, ids);
       save(); rerender();
     },
-    clearmenu: function () { ST.menu = { date: todayStr(), ids: [] }; save(); rerender(); },
+    clearmenu: function () { setDay(todayStr(), []); save(); rerender(); },
+    weekrm: function (el) {
+      const ids = dayIds(el.dataset.d);
+      toggleIn(ids, el.dataset.id);
+      setDay(el.dataset.d, ids); save(); rerender();
+    },
+    weekadd: function (el) { PICK_DAY = el.dataset.d; location.hash = "#/recipes"; },
+    shopdays: function (el) { ST.shopDays = Number(el.dataset.v); save(); rerender(); },
     fb: function (el) {
       const t = todayStr();
       ST.fb[t] = ST.fb[t] || {};
@@ -730,10 +805,16 @@
     big: function (el) { showBig(el.dataset.k); },
     closebig: function () { pendingMenu = null; $("#overlay").classList.remove("show"); A.stop(); },
     acceptmenu: function () {
-      if (pendingMenu) { ST.menu = pendingMenu; ST.shop = []; save(); }
+      const pm = pendingMenu;
       pendingMenu = null;
       $("#overlay").classList.remove("show");
-      toast("📅 " + U1("menuLoaded"));
+      if (!pm) return;
+      /* 舊日期的菜單：使用者看過警告仍要用，就當成今天的。之後的日期：存到那一天 */
+      const future = pm.date > todayStr();
+      setDay(future ? pm.date : todayStr(), pm.ids);
+      ST.shop = []; save();
+      toast("📅 " + (future ? U1("menuSaved") + " " + shortDate(pm.date) : U1("menuLoaded")));
+      if (future) { location.hash = "#/week"; return; }
       if (/^#\/menu/.test(location.hash)) rerender(); else location.hash = "#/menu";
     }
   };
