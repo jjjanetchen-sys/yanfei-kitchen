@@ -57,6 +57,11 @@ YF.UI = {
   copied: ["已複製", "Copied", "Nakopya na"],
   clear: ["清空菜單", "Clear menu", "Burahin ang menu"],
   menuLoaded: ["已收到今天的菜單", "Today's menu received", "Natanggap na ang menu ngayon"],
+  menuAsk: ["要換成這份菜單嗎？", "Use this menu?", "Gamitin ang menu na ito?"],
+  menuOld: ["這不是今天的菜單，日期是舊的", "This menu is not for today. The date is old.", "Hindi ito ang menu ngayon. Luma ang petsa."],
+  menuReplace: ["目前的菜單會被換掉", "Your current menu will be replaced", "Mapapalitan ang kasalukuyang menu"],
+  menuYes: ["換成這份", "Use this menu", "Gamitin ito"],
+  menuNo: ["不要", "No, keep mine", "Huwag"],
   menuDate: ["菜單日期", "Menu date", "Petsa ng menu"],
   cookNow: ["開始做", "Start cooking", "Simulan ang pagluto"],
 

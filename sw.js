@@ -1,5 +1,5 @@
 /* 離線快取：讓廚房網路不好時也能開。更新網站內容後，把 VERSION 數字加 1，手機才會抓到新版。 */
-const VERSION = "yanfei-v2";
+const VERSION = "yanfei-v3";
 const CORE = [
   "./", "index.html", "record.html", "manifest.json",
   "css/style.css",

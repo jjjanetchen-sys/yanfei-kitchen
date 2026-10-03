@@ -28,7 +28,10 @@
     if (m >= 9 && m <= 11) return "autumn";
     return "winter";
   }
-  function baseUrl() { return location.href.split("#")[0]; }
+  /* 分享用的網址。openExternalBrowser=1 會讓 LINE 改用手機預設瀏覽器打開，
+     這樣菜單才會存在看護平常用的瀏覽器裡，而不是 LINE 內建瀏覽器 */
+  function baseUrl() { return location.origin + location.pathname + "?openExternalBrowser=1"; }
+  function compactDate(d) { return String(d).replace(/-/g, ""); }
 
   /* ---------- 狀態 ---------- */
   const DEFAULTS = { lang: "zh", multi: true, menu: { date: "", ids: [] }, fridge: [], fb: {}, shop: [] };
@@ -163,7 +166,7 @@
       '<div class="wrap">' +
       '<div class="strip"><div class="strip-season">' + s.e + " " + UT("season") + " <b>" + P1(s) + "</b></div>" + strip + "</div>" +
       '<div class="tiles">' + tiles + "</div>" +
-      '<p class="tip">💡 ' + UT("installTip") + "</p></div>";
+      (/Android/i.test(navigator.userAgent) ? '<p class="tip">💡 ' + UT("installTip") + "</p>" : "") + "</div>";
   }
 
   /* ---------- 食譜列表 ---------- */
@@ -267,7 +270,7 @@
   }
 
   /* ---------- 今日菜單 ---------- */
-  function menuLink() { return baseUrl() + "#/menu?m=" + ST.menu.ids.join(",") + "&d=" + (ST.menu.date || todayStr()) + "&l=tl"; }
+  function menuLink() { return baseUrl() + "#/menu?m=" + ST.menu.ids.join("-") + "&d=" + (ST.menu.date || todayStr()) + "&l=tl"; }
   function vMenu() {
     const ids = ST.menu.ids.filter(function (id) { return REC[id]; });
     const d = ST.menu.date || todayStr();
@@ -436,7 +439,7 @@
     const ids = Object.keys(day).filter(function (id) { return REC[id]; });
     if (!ids.length) return "";
     const word = { all: ui("ateAll"), half: ui("ateHalf"), no: ui("ateNone") };
-    const pairs = ids.map(function (id) { return t + "." + id + "." + day[id]; }).join(",");
+    const pairs = ids.map(function (id) { return compactDate(t) + "." + id + "." + day[id]; }).join("-");
     return "【燕飛食光】" + shortDate(t) + " " + ui("feedback").zh + " / " + ui("feedback").tl + "\n" +
       ids.map(function (id) { return FB_ICON[day[id]] + " " + REC[id].zh + " — " + word[day[id]].zh + " / " + word[day[id]].tl; }).join("\n") +
       "\n" + baseUrl() + "#/feedback?fb=" + pairs;
@@ -501,28 +504,49 @@
     navigator.wakeLock.request("screen").then(function (w) { wake = w; }).catch(function () {});
   }
 
+  /* 收到的菜單先放這裡，等使用者按「換成這份」才寫入 */
+  let pendingMenu = null;
   function importShared(q) {
+    const had = q.has("l") || q.has("m") || q.has("fb");
     let changed = false;
     if (q.has("l") && LANGS.indexOf(q.get("l")) >= 0 && !ST.langSet) { ST.lang = q.get("l"); changed = true; }
     if (q.has("m")) {
-      const ids = q.get("m").split(",").filter(function (id) { return REC[id]; });
-      ST.menu = { date: q.get("d") || todayStr(), ids: ids };
-      changed = true;
-      toast("📅 " + U1("menuLoaded"));
+      /* 分隔符號是連字號；舊連結的逗號也接受 */
+      const ids = q.get("m").split(/[-,]/).filter(function (id, i, arr) { return REC[id] && arr.indexOf(id) === i; });
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(q.get("d") || "") ? q.get("d") : todayStr();
+      const same = date === ST.menu.date && ids.join() === ST.menu.ids.join();
+      if (ids.length && !same) pendingMenu = { date: date, ids: ids };
     }
     if (q.has("fb")) {
-      q.get("fb").split(",").forEach(function (item) {
-        const p = item.split(".");
-        if (p.length === 3 && REC[p[1]] && FB_ICON[p[2]]) {
-          ST.fb[p[0]] = ST.fb[p[0]] || {};
-          ST.fb[p[0]][p[1]] = p[2];
-        }
-      });
-      changed = true;
-      toast("😋 " + U1("fbMerged"));
+      /* 格式：20261003.菜id.結果，用連字號相連；舊格式（2026-10-03、逗號）也接受 */
+      const re = /(\d{4})-?(\d{2})-?(\d{2})\.([a-z0-9_]+)\.(all|half|no)/g;
+      let m;
+      let n = 0;
+      while ((m = re.exec(q.get("fb")))) {
+        if (!REC[m[4]]) continue;
+        const d = m[1] + "-" + m[2] + "-" + m[3];
+        ST.fb[d] = ST.fb[d] || {};
+        ST.fb[d][m[4]] = m[5];
+        n++;
+      }
+      if (n) { changed = true; toast("😋 " + U1("fbMerged")); }
     }
     if (changed) save();
-    return changed;
+    return had;
+  }
+  function showMenuAsk() {
+    if (!pendingMenu) return;
+    const pm = pendingMenu;
+    const old = pm.date !== todayStr();
+    const cur = ST.menu.ids.filter(function (id) { return REC[id]; });
+    const ov = $("#overlay");
+    ov.innerHTML = '<div class="obox ask"><div class="oe">📅</div><h2 class="askq">' + U("menuAsk") + "</h2>" +
+      '<p class="askdate">' + UT("menuDate") + ": <b>" + shortDate(pm.date) + "</b></p>" +
+      (old ? '<p class="askwarn">⚠️ ' + U("menuOld") + "</p>" : "") +
+      '<ol class="asklist">' + pm.ids.map(function (id) { return "<li>" + REC[id].e + " " + tri(REC[id]) + "</li>"; }).join("") + "</ol>" +
+      (cur.length ? '<p class="dim">' + UT("menuReplace") + "：" + cur.map(function (id) { return P1(REC[id]); }).join("、") + "</p>" : "") +
+      '<div class="askbtns"><button class="btn big on" data-act="acceptmenu">✓ ' + U1("menuYes") + '</button><button class="btn big ghost" data-act="closebig">✕ ' + U1("menuNo") + "</button></div></div>";
+    ov.classList.add("show");
   }
 
   function route() {
@@ -552,6 +576,7 @@
     $("#app").innerHTML = html;
     window.scrollTo(0, 0);
     renderChrome(name);
+    showMenuAsk();
   }
   /* 狀態改變後重畫，但保留捲動位置 */
   function rerender() {
@@ -703,7 +728,14 @@
       el.classList.toggle("is-done");
     },
     big: function (el) { showBig(el.dataset.k); },
-    closebig: function () { $("#overlay").classList.remove("show"); A.stop(); }
+    closebig: function () { pendingMenu = null; $("#overlay").classList.remove("show"); A.stop(); },
+    acceptmenu: function () {
+      if (pendingMenu) { ST.menu = pendingMenu; ST.shop = []; save(); }
+      pendingMenu = null;
+      $("#overlay").classList.remove("show");
+      toast("📅 " + U1("menuLoaded"));
+      if (/^#\/menu/.test(location.hash)) rerender(); else location.hash = "#/menu";
+    }
   };
 
   document.addEventListener("click", function (ev) {
