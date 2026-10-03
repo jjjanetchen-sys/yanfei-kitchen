@@ -1,0 +1,14 @@
+{
+  "name": "燕飛食光",
+  "short_name": "燕飛食光",
+  "description": "台式家常菜三語食譜：中文、English、Tagalog，附台語真人錄音",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbfdff",
+  "theme_color": "#1d5bbf",
+  "icons": [
+    { "src": "images/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "images/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

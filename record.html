@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台語錄音 · 燕飛食光</title>
+  <meta name="theme-color" content="#1d5bbf">
+  <link rel="icon" href="images/icon-192.png">
+  <style>
+    :root { --blue:#1d5bbf; --blue-d:#143f86; --blue-l:#dbe8fa; --blue-xl:#f0f6fe; --yellow:#f4b940; --yellow-l:#fff3d4; --ink:#1b2a41; --muted:#5d6c82; --line:#cddff5; --ok:#2c8a55; --red:#d33b2c; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif; font-size:19px; line-height:1.5; color:var(--ink); background:#fbfdff; padding-bottom:40px; }
+    header { background:var(--blue); color:#fff; padding:14px 16px; }
+    header h1 { margin:0; font-size:22px; }
+    header a { color:#fff; }
+    main { max-width:760px; margin:0 auto; padding:14px 16px; }
+    .howto { background:var(--yellow-l); border:2px solid var(--yellow); border-radius:16px; padding:12px 16px; font-size:17px; }
+    .howto ol { margin:6px 0 0; padding-left:22px; }
+    select, .dl { width:100%; min-height:54px; font-size:19px; border:3px solid var(--line); border-radius:14px; padding:6px 12px; background:#fff; margin:12px 0 4px; }
+    .item { background:#fff; border:2px solid var(--line); border-radius:18px; padding:12px 14px; margin:12px 0; }
+    .item.done { border-color:var(--ok); background:#f2fbf5; }
+    .zh { font-size:24px; font-weight:800; color:var(--blue-d); }
+    .tl { font-size:14px; color:var(--muted); }
+    .key { font-size:12px; color:var(--muted); font-family:monospace; }
+    .row { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    button { font:inherit; min-height:50px; padding:6px 16px; border-radius:999px; border:3px solid var(--blue); background:#fff; color:var(--blue-d); font-weight:700; cursor:pointer; }
+    button.rec { border-color:var(--red); color:var(--red); }
+    button.rec.on { background:var(--red); color:#fff; animation:pulse 1s infinite; }
+    button:disabled { opacity:.35; }
+    @keyframes pulse { 50% { opacity:.6; } }
+    .count { color:var(--muted); font-size:16px; }
+    .dl { background:var(--blue); color:#fff; border-color:var(--blue); }
+    #msg { color:var(--red); font-weight:700; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎙️ 台語錄音</h1>
+    <a href="index.html">← 回到燕飛食光</a>
+  </header>
+  <main>
+    <div class="howto">
+      <b>怎麼用：</b>
+      <ol>
+        <li>選一組要錄的內容。</li>
+        <li>按「● 錄音」，用台語把畫面上的中文念出來，念完按「■ 停止」。</li>
+        <li>按「▶ 播放」聽聽看，不滿意就重錄。</li>
+        <li>全部錄完，按最下面的「下載全部錄音」，把下載的檔案交給負責上傳的家人：錄音檔放進 <code>audio/tw/</code>，最後一個 <code>tw-list.js</code> 放進 <code>data/</code>（覆蓋舊的）。</li>
+      </ol>
+      <p style="margin:6px 0 0">錄音會暫存在這支手機，關掉網頁也不會不見。第一次按錄音，手機會問能不能用麥克風，請按「允許」。</p>
+    </div>
+    <p id="msg"></p>
+    <select id="group" aria-label="選擇要錄的內容"></select>
+    <p class="count" id="count"></p>
+    <div id="list"></div>
+    <button class="dl" id="dlall">⬇ 下載全部錄音</button>
+  </main>
+
+  <script src="data/ui.js"></script>
+  <script src="data/ingredients.js"></script>
+  <script src="data/recipes.js"></script>
+  <script src="data/phrases.js"></script>
+  <script src="data/vocab.js"></script>
+  <script src="data/tw-list.js"></script>
+  <script>
+  (function () {
+    var D = window.YF;
+    var $ = function (s) { return document.querySelector(s); };
+
+    /* 要錄的內容分組。key 會變成檔名 */
+    var groups = [];
+    groups.push({ id: "phrases", name: "① 常用句（最重要，先錄這個）", items: D.PHRASES.map(function (p) { return { key: p.key, zh: p.zh, tl: p.tl }; }) });
+    groups.push({ id: "titles", name: "② 菜名", items: D.RECIPES.map(function (r) { return { key: "r_" + r.id, zh: r.zh, tl: r.tl }; }) });
+    ["cutting", "heat", "tool", "ingredient", "seasoning"].forEach(function (c) {
+      groups.push({ id: "v_" + c, name: "③ 詞彙：" + D.VOCAB_CATS[c].zh, items: D.VOCAB.filter(function (v) { return v.cat === c; }).map(function (v) { return { key: v.key, zh: v.zh, tl: v.tl }; }) });
+    });
+    D.RECIPES.forEach(function (r) {
+      groups.push({ id: "s_" + r.id, name: "④ 步驟：" + r.zh, items: r.steps.map(function (s, i) { return { key: r.id + "_s" + (i + 1), zh: s.zh, tl: s.tl }; }) });
+    });
+
+    /* IndexedDB：把錄音存在手機裡 */
+    var db = null;
+    function openDb() {
+      return new Promise(function (res, rej) {
+        var rq = indexedDB.open("yanfei_tw", 1);
+        rq.onupgradeneeded = function () { rq.result.createObjectStore("rec"); };
+        rq.onsuccess = function () { db = rq.result; res(); };
+        rq.onerror = function () { rej(rq.error); };
+      });
+    }
+    function dbGet(k) { return new Promise(function (res) { var r = db.transaction("rec").objectStore("rec").get(k); r.onsuccess = function () { res(r.result || null); }; r.onerror = function () { res(null); }; }); }
+    function dbPut(k, v) { return new Promise(function (res) { var t = db.transaction("rec", "readwrite"); t.objectStore("rec").put(v, k); t.oncomplete = res; }); }
+    function dbAll() { return new Promise(function (res) { var out = []; var r = db.transaction("rec").objectStore("rec").openCursor(); r.onsuccess = function () { var c = r.result; if (c) { out.push({ key: c.key, v: c.value }); c.continue(); } else res(out); }; r.onerror = function () { res(out); }; }); }
+
+    function extOf(type) {
+      if (/mp4|aac/.test(type)) return "m4a";
+      if (/mpeg/.test(type)) return "mp3";
+      if (/ogg/.test(type)) return "ogg";
+      if (/wav/.test(type)) return "wav";
+      return "webm";
+    }
+
+    var cur = groups[0];
+    var rec = null, chunks = [], recKey = null, stream = null;
+
+    function msg(t) { $("#msg").textContent = t || ""; }
+
+    function render() {
+      var gs = $("#group");
+      if (!gs.options.length) {
+        groups.forEach(function (g, i) { var o = document.createElement("option"); o.value = i; o.textContent = g.name + "（" + g.items.length + "）"; gs.appendChild(o); });
+      }
+      var html = "";
+      cur.items.forEach(function (it) {
+        html += '<div class="item" id="it_' + it.key + '"><div class="zh">' + it.zh + '</div><div class="tl">' + it.tl + '</div><div class="key">' + it.key + '</div>' +
+          '<div class="row"><button class="rec" data-a="rec" data-k="' + it.key + '">● 錄音</button>' +
+          '<button data-a="play" data-k="' + it.key + '" disabled>▶ 播放</button>' +
+          '<button data-a="dl" data-k="' + it.key + '" disabled>⬇ 下載</button></div></div>';
+      });
+      $("#list").innerHTML = html;
+      refresh();
+    }
+
+    function refresh() {
+      dbAll().then(function (all) {
+        var have = {};
+        all.forEach(function (x) { have[x.key] = true; });
+        var n = 0;
+        cur.items.forEach(function (it) {
+          var el = document.getElementById("it_" + it.key);
+          if (!el) return;
+          var ok = !!have[it.key];
+          if (ok) n++;
+          el.classList.toggle("done", ok);
+          el.querySelector('[data-a="play"]').disabled = !ok;
+          el.querySelector('[data-a="dl"]').disabled = !ok;
+        });
+        $("#count").textContent = "這一組已錄 " + n + " / " + cur.items.length + "　　全部已錄 " + all.length + " 句";
+      });
+    }
+
+    function startRec(key, btn) {
+      if (!navigator.mediaDevices || !window.MediaRecorder) { msg("這個瀏覽器不能錄音，請改用 Safari（iPhone）或 Chrome（Android）。"); return; }
+      msg("");
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+        stream = s; chunks = []; recKey = key;
+        var type = window.MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
+        rec = type ? new MediaRecorder(s, { mimeType: type }) : new MediaRecorder(s);
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
+          var blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          dbPut(key, { blob: blob, type: blob.type }).then(function () { rec = null; recKey = null; render(); });
+        };
+        rec.start();
+        btn.classList.add("on"); btn.textContent = "■ 停止";
+      }).catch(function () { msg("沒有取得麥克風權限。請在手機設定裡允許這個網頁使用麥克風。"); });
+    }
+
+    function save(blob, key, type) {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = key + "." + extOf(type);
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    }
+
+    $("#list").addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-a]");
+      if (!b) return;
+      var k = b.dataset.k;
+      if (b.dataset.a === "rec") {
+        if (rec && recKey === k) { rec.stop(); return; }
+        if (rec) { msg("請先按「■ 停止」。"); return; }
+        startRec(k, b);
+      } else if (b.dataset.a === "play") {
+        dbGet(k).then(function (v) { if (v) { var au = new Audio(URL.createObjectURL(v.blob)); au.play(); } });
+      } else if (b.dataset.a === "dl") {
+        dbGet(k).then(function (v) { if (v) save(v.blob, k, v.type); });
+      }
+    });
+    $("#group").addEventListener("change", function (e) { cur = groups[Number(e.target.value)]; render(); });
+    $("#dlall").addEventListener("click", function () {
+      dbAll().then(function (all) {
+        if (!all.length) { msg("還沒有錄音。"); return; }
+        all.forEach(function (x, i) { setTimeout(function () { save(x.v.blob, x.key, x.v.type); }, i * 600); });
+        /* 最後再下載清單檔 tw-list.js：已上傳過的＋這次錄的 */
+        var list = Object.assign({}, D.TW || {});
+        all.forEach(function (x) { list[x.key] = extOf(x.v.type); });
+        var js = "/* 已上傳的台語錄音清單（由 record.html 自動產生） */\nwindow.YF = window.YF || {};\nYF.TW = " + JSON.stringify(list, null, 2) + ";\n";
+        setTimeout(function () {
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(new Blob([js], { type: "text/javascript" }));
+          a.download = "tw-list.js";
+          document.body.appendChild(a); a.click();
+          setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+        }, all.length * 600 + 400);
+      });
+    });
+
+    openDb().then(render).catch(function () { msg("這個瀏覽器無法暫存錄音（可能是無痕模式）。請改用一般模式。"); });
+  })();
+  </script>
+</body>
+</html>
